@@ -1,5 +1,5 @@
 const express = require("express");
-//const cors = require("cors");
+const cors = require("cors");
 //const dotenv = require("dotenv");
 const pool = require("./db/config");
 const { createServer } = require("http");
@@ -7,10 +7,20 @@ const { Server } = require("socket.io");
 
 const footballApi = require("./services/footballApi");
 const MatchSimulator = require("./services/matchSimulator");
-const { version } = require("os");
-const { start } = require("repl");
+
+require("dotenv").config();
+// const { version } = require("os");
+// const { start } = require("repl");
 
 const app = express();
+
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+    credentials: true,
+  })
+);
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {

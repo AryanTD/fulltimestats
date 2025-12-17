@@ -1,4 +1,4 @@
-const footballApi = require("./footballApi");
+const pool = require("../db/config");
 
 class MatchSimulator {
   constructor(io) {
@@ -7,132 +7,120 @@ class MatchSimulator {
     this.simulationInterval = null;
   }
 
-  async startSimulation(leagueId) {
+  /**
+   * Start simulating live matches using DATABASE
+   */
+  async startSimulation() {
     try {
-      console.log("Starting match simulation !!!");
+      console.log("🎮 Starting match simulation from DATABASE...");
 
-      const matchPromises = [
-        this.fetchMatchesForLeagues(footballApi.LEAGUES.PREMIER_LEAGUE),
-        "Premier League",
-        this.fetchMatchesForLeagues(footballApi.LEAGUES.LA_LIGA),
-        "La Liga",
-        this.fetchMatchesForLeagues(footballApi.LEAGUES.SERIE_A),
-        "Serie A",
-        this.fetchMatchesForLeagues(footballApi.LEAGUES.BUNDESLIGA),
-        "Bundesliga",
-        this.fetchMatchesForLeagues(footballApi.LEAGUES.LIGUE_1),
-        "Ligue 1",
-      ];
+      // Fetch random matches from database
+      const result = await pool.query(`
+        SELECT * FROM matches 
+        ORDER BY RANDOM() 
+        LIMIT 6
+      `);
 
-      const allLeagueMatches = await Promise.all(matchPromises);
+      const matches = result.rows;
 
-      const selectedMatches = this.selectRandomMatches(
-        allLeagueMatches.flat(),
-        4
+      if (matches.length === 0) {
+        console.log(
+          "❌ No matches found in database. Please run: node scripts/seedMatches.js"
+        );
+        return;
+      }
+
+      console.log(
+        `✅ Loaded ${matches.length} matches from database (0 API calls used!)`
       );
 
-      this.activeMatches = selectedMatches.map((match) => ({
-        id: match.fixture.id,
-        league: match.league.name,
-        homeTeam: match.teams.home.name,
-        awayTeam: match.teams.away.name,
+      // Initialize matches for simulation
+      this.activeMatches = matches.map((match) => ({
+        id: match.api_id,
+        league: match.league_name,
+        homeTeam: match.home_team_name,
+        awayTeam: match.away_team_name,
         homeScore: 0,
         awayScore: 0,
-        finalHomeScore: match.goals.home,
-        finalAwayScore: match.goals.away,
+        finalHomeScore: match.home_score,
+        finalAwayScore: match.away_score,
         minute: 0,
         status: "LIVE",
-        homeLogo: match.teams.home.logo,
-        awayLogo: match.teams.away.logo,
+        homeLogo: match.home_team_logo,
+        awayLogo: match.away_team_logo,
       }));
 
       console.log(`⚽ Simulating ${this.activeMatches.length} matches`);
 
+      // Emit initial state
       this.io.emit("matches:update", this.activeMatches);
 
+      // Start the simulation loop
       this.simulationInterval = setInterval(() => {
-        this.updateMatchStates();
-      }, 2000);
+        this.updateMatches();
+      }, 2000); // Update every 2 seconds
     } catch (error) {
-      console.error("Error starting match simulation:", error.message);
+      console.error("❌ Error starting simulation:", error.message);
     }
   }
 
-  async fetchMatchesForLeagues(leagueId, leagueName) {
-    try {
-      const data = await footballApi.getMatchesByDateRange(
-        leagueId,
-        "2022-12-26",
-        "2022-12-31"
-      );
-      const matches = data.response || [];
-
-      return matches.map((match) => ({
-        ...match,
-        leagueName: leagueName,
-      }));
-    } catch (error) {
-      console.error(
-        `Error fetching matches for league ${leagueId}:`,
-        error.message
-      );
-      return [];
-    }
-  }
-
-  selectRandomMatches(allLeagueMatches, count) {
-    const allMatches = allLeagueMatches.flat();
-    const shuffled = allMatches.sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, count);
-  }
-
+  /**
+   * Update match state (increment time, add goals)
+   */
   updateMatches() {
     let hasChanges = false;
 
     this.activeMatches = this.activeMatches.map((match) => {
-      if (match.status === "FT") return match;
+      // Skip if match is finished
+      if (match.status === "FT") {
+        return match;
+      }
 
+      // Increment minute
       match.minute += 1;
 
+      // Check if we should add a goal
       if (this.shouldScoreGoal(match)) {
-        const team = Math.random() < 0.5 ? "home" : "away";
+        const team = Math.random() > 0.5 ? "home" : "away";
 
         if (team === "home" && match.homeScore < match.finalHomeScore) {
           match.homeScore += 1;
           console.log(
-            `Goal! ${match.homeTeam} scores! Current Score: ${match.homeScore}-${match.awayScore}`
+            `⚽ GOAL! ${match.homeTeam} scores! (${match.homeScore}-${match.awayScore})`
           );
           hasChanges = true;
         } else if (team === "away" && match.awayScore < match.finalAwayScore) {
           match.awayScore += 1;
           console.log(
-            `Goal! ${match.awayTeam} scores! Current Score: ${match.homeScore}-${match.awayScore}`
+            `⚽ GOAL! ${match.awayTeam} scores! (${match.homeScore}-${match.awayScore})`
           );
           hasChanges = true;
         }
       }
 
+      // Half-time at 45 minutes
       if (match.minute === 45) {
         match.status = "HT";
-        console.log(`⏸️  Halftime in ${match.homeTeam} vs ${match.awayTeam}`);
-        hasChanges = true;
-      }
-
-      if (match.minute === 46) {
-        match.status = "LIVE";
         console.log(
-          `Second half started in ${match.homeTeam} vs ${match.awayTeam}`
+          `⏸️  Half-time: ${match.homeTeam} ${match.homeScore}-${match.awayScore} ${match.awayTeam}`
         );
         hasChanges = true;
       }
 
+      // Resume after half-time
+      if (match.minute === 46) {
+        match.status = "LIVE";
+        hasChanges = true;
+      }
+
+      // Full-time at 90 minutes
       if (match.minute >= 90) {
-        match.status = "FT";
         match.minute = 90;
+        match.status = "FT";
         match.homeScore = match.finalHomeScore;
         match.awayScore = match.finalAwayScore;
         console.log(
-          `Fulltime in ${match.homeTeam} vs ${match.awayTeam}. Final Score: ${match.homeScore}-${match.awayScore}`
+          `🏁 Full-time: ${match.homeTeam} ${match.homeScore}-${match.awayScore} ${match.awayTeam}`
         );
         hasChanges = true;
       }
@@ -140,48 +128,64 @@ class MatchSimulator {
       return match;
     });
 
+    // Emit updates if something changed
     if (hasChanges) {
       this.io.emit("matches:update", this.activeMatches);
     }
 
-    const allFinished = this.activeMatches.every(
-      (match) => match.status === "FT"
-    );
+    // Check if all matches are finished
+    const allFinished = this.activeMatches.every((m) => m.status === "FT");
     if (allFinished) {
       console.log(
-        "All matches finished. Starting new simulation in 10 seconds..."
+        "✅ All matches finished! Starting new simulation in 10 seconds..."
       );
       clearInterval(this.simulationInterval);
 
+      // Start new simulation after 10 seconds
       setTimeout(() => {
         this.startSimulation();
       }, 10000);
     }
   }
 
+  /**
+   * Determine if a goal should be scored this minute
+   */
   shouldScoreGoal(match) {
+    // Calculate how many goals still need to be scored
     const remainingHomeGoals = match.finalHomeScore - match.homeScore;
     const remainingAwayGoals = match.finalAwayScore - match.awayScore;
     const totalRemainingGoals = remainingHomeGoals + remainingAwayGoals;
 
+    // No more goals to score
     if (totalRemainingGoals === 0) {
       return false;
     }
 
+    // Calculate minutes remaining
     const minutesRemaining = 90 - match.minute;
+
+    // Probability increases as we get closer to end of match
     const baseProbability = totalRemainingGoals / minutesRemaining;
 
+    // Random chance based on probability
     return Math.random() < baseProbability * 0.5;
   }
 
+  /**
+   * Stop simulation
+   */
   stopSimulation() {
     if (this.simulationInterval) {
       clearInterval(this.simulationInterval);
       this.simulationInterval = null;
-      console.log("Match simulation stopped.");
+      console.log("⏹️  Simulation stopped");
     }
   }
 
+  /**
+   * Get current active matches
+   */
   getActiveMatches() {
     return this.activeMatches;
   }

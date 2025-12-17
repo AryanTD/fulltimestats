@@ -1,4 +1,6 @@
+//Importing the pg library to interact with PostgreSQL
 const { Pool } = require("pg");
+//Loading environment variables from .env file
 require("dotenv").config();
 
 const pool = new Pool({

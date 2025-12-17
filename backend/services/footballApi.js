@@ -1,9 +1,11 @@
+//Setup and configuration
 const axios = require("axios");
 require("dotenv").config();
 
 const API_KEY = process.env.FOOTBALL_API_KEY;
 const API_URL = process.env.FOOTBALL_API_URL;
 
+// Creating an axios instance
 const footballApi = axios.create({
   baseURL: API_URL,
   headers: {
@@ -12,6 +14,7 @@ const footballApi = axios.create({
   },
 });
 
+// Constants
 const LEAGUES = {
   PREMIER_LEAGUE: 39,
   LA_LIGA: 140,
@@ -21,6 +24,8 @@ const LEAGUES = {
 };
 
 const CURRENT_SEASON = 2022;
+
+//API Functions
 
 // Get all leagues info
 const getAllLeagues = async () => {
@@ -37,6 +42,7 @@ const getAllLeagues = async () => {
   }
 };
 
+// Get league standings
 const getLeagueStandings = async (leagueId) => {
   try {
     const response = await footballApi.get("/standings", {
@@ -55,6 +61,7 @@ const getLeagueStandings = async (leagueId) => {
   }
 };
 
+// Get live matches for a league
 const getLiveMatches = async (leagueId) => {
   try {
     const response = await footballApi.get("/fixtures", {
@@ -74,6 +81,7 @@ const getLiveMatches = async (leagueId) => {
   }
 };
 
+// Get matches on a specific date
 const getMatchesByDate = async (leagueId, date) => {
   try {
     const response = await footballApi.get("/fixtures", {
@@ -93,6 +101,7 @@ const getMatchesByDate = async (leagueId, date) => {
   }
 };
 
+// Get all live matches across leagues
 const getAllLiveMatches = async () => {
   try {
     const liveMatches = [];
